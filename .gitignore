@@ -1,2 +1,5 @@
 *.zip
 .lib/
+
+# Binary search temporary files
+.lovelyignore
