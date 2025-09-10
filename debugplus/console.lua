@@ -398,6 +398,28 @@ commands = {{
 }}
 local input = ui.TextInput.new(0)
 
+local function loadHistory()
+    if not config.getValue("commandHistory") then return end
+    local content = love.filesystem.read("config/DebugPlus.history.jkr")
+    if not content then
+        return
+    end
+    local t = {}
+    for str in string.gmatch(content, "([^\n\r]+)") do
+        table.insert(history, 1, util.unescapeSimple(str))
+    end
+end
+
+local function saveHistory()
+    local max = config.getValue("commandHistoryMax")
+    local str = ""
+    for i = math.min(#history, max), 1, -1 do
+        if str ~= "" then str = str .. "\n" end
+        str = str .. util.escapeSimple(history[i])
+    end
+    love.filesystem.write("config/DebugPlus.history.jkr", str)
+end
+
 local function closeConsole()
     input:clear()
     consoleOpen = false
@@ -415,6 +437,10 @@ local function runCommand()
     logger.handleLog({1, 0, 1}, "INFO", "> " .. inputText)
     if history[1] ~= inputText then
         table.insert(history, 1, inputText)
+    end
+
+    if config.getValue("commandHistory") then
+        saveHistory()
     end
 
     local cmdName = string.lower(string.gsub(inputText, "^(%S+).*", "%1"))
@@ -463,11 +489,12 @@ local function runCommand()
     end
 end
 
-function global.consoleHandleKey(key)
+local orig_keypressed
+local function consoleHandleKey(key, scancode, isrepeat)
     if not consoleOpen then
         local toCheck = key
         if love.keyboard.getScancodeFromKey("/") == "unknown" then
-            toCheck = love.keyboard.getScancodeFromKey(key)
+            toCheck = scancode
         end
         if toCheck == '/' or toCheck == 'kp/' then
             if util.isShiftDown() then
@@ -475,6 +502,9 @@ function global.consoleHandleKey(key)
             else
                 openNextFrame = true -- This is to prevent the keyboard handler from typing this key
             end
+        end
+        if orig_keypressed then
+            return orig_keypressed(key, scancode, isrepeat)
         end
         return true
     end
@@ -549,6 +579,9 @@ local function hookStuffs()
 
     orig_wheelmoved = love.wheelmoved
     love.wheelmoved = wheelmoved
+
+    orig_keypressed = love.keypressed
+    love.keypressed = consoleHandleKey
 end
 
 local function calcHeight(text, width)
@@ -573,6 +606,7 @@ local function hyjackErrorHandler()
         local ret = orig(msg)
         orig_wheelmoved = nil
         orig_textinput = nil
+        orig_keypressed = nil
         closeConsole()
         local justCrashed = true
 
@@ -599,7 +633,7 @@ local function hyjackErrorHandler()
                 elseif consoleOpen and e == "wheelmoved" then
                     safeCall(wheelmoved, a, b)
                 elseif e == "keypressed" then
-                    if safeCall(global.consoleHandleKey, a) then
+                    if safeCall(consoleHandleKey, a) then
                         table.insert(evts, {e,a,b,c})
                     end
                 else
@@ -639,6 +673,7 @@ function global.doConsoleRender()
     local now = love.timer.getTime()
     if firstConsoleRender == nil then
         if config.getValue("hyjackErrorHandler") then hyjackErrorHandler() end
+        loadHistory()
         hookStuffs()
         firstConsoleRender = now
         local key = "/"
@@ -749,6 +784,10 @@ end
 logger.handleLogsChange = handleLogsChange
 config.configDefinition.showNewLogs.onUpdate = function(v)
     showNewLogs = v
+end
+
+function global.isConsoleFocused() -- For mods to disable keys.
+    return consoleOpen
 end
 
 return global
